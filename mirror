@@ -1,0 +1,71 @@
+✅ Best Approach: Use skopeo or oc image mirror in a Job or CronJob
+
+You can mirror images from one registry to another using skopeo or oc image mirror, which can be wrapped in:
+	•	An OpenShift Job or CronJob
+	•	Or a Tekton Task/Pipeline
+
+⸻
+
+🧱 Example: OpenShift Job to Mirror Image (no build)
+
+🔧 Create a Job that:
+	1.	Pulls from Registry 1 (private)
+	2.	Pushes to ECR
+
+⸻
+
+✅ Required secrets:
+
+1. Pull secret for Registry 1:
+
+oc create secret docker-registry reg1-auth \
+  --docker-server=registry1.example.com \
+  --docker-username=<user> \
+  --docker-password=<pass> \
+  --docker-email=dummy@example.com
+
+2. Push secret for ECR:
+aws ecr get-login-password --region <region> | \
+oc create secret docker-registry ecr-auth \
+  --docker-server=<acct>.dkr.ecr.<region>.amazonaws.com \
+  --docker-username=AWS \
+  --docker-password-stdin
+
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: mirror-image-job
+spec:
+  template:
+    spec:
+      containers:
+      - name: mirror
+        image: quay.io/skopeo/stable:latest
+        command:
+        - /bin/bash
+        - -c
+        - |
+          skopeo copy \
+            --src-creds $REG1_USER:$REG1_PASS \
+            --dest-creds $ECR_USER:$ECR_PASS \
+            docker://registry1.example.com/myrepo/myimage:latest \
+            docker://<acct>.dkr.ecr.<region>.amazonaws.com/my-ecr-repo:latest
+        env:
+        - name: REG1_USER
+          valueFrom:
+            secretKeyRef:
+              name: reg1-auth
+              key: .dockerconfigjson
+        - name: REG1_PASS
+          valueFrom:
+            secretKeyRef:
+              name: reg1-auth
+              key: .dockerconfigjson
+        - name: ECR_USER
+          value: AWS
+        - name: ECR_PASS
+          valueFrom:
+            secretKeyRef:
+              name: ecr-auth
+              key: .dockerconfigjson
+      restartPolicy: Never
